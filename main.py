@@ -17,8 +17,7 @@ from typing import List, Optional
 
 # using a global to manage coroutines
 RUNNING_TASKS = []
-logging.basicConfig(format="[%(asctime)s][%(name)s]: %(message)s",
-                    level=logging.INFO)
+logging.basicConfig(format="[%(asctime)s][%(name)s]: %(message)s", level=logging.INFO)
 
 
 class Output:
@@ -29,6 +28,7 @@ class Output:
     appropriate stream to write to, as well as writing it to both
     stdout and to a file.
     """
+
     def __init__(self, output_dir: Optional[str] = None):
         self.output_dir = output_dir
         self._file_handle_cache = {}
@@ -37,13 +37,13 @@ class Output:
         if self.output_dir:
             if stream_name not in self._file_handle_cache:
                 self._file_handle_cache[stream_name] = open(
-                    os.path.join(self.output_dir, stream_name + ".txt"), "w+")
+                    os.path.join(self.output_dir, stream_name + ".txt"), "w+"
+                )
             now = datetime.datetime.now().isoformat()
             self._file_handle_cache[stream_name].write(f"[{now}]: {contents}")
         logging.getLogger(stream_name).info(contents.rstrip("\n"))
 
-    async def read_stream(self, stream_name: str,
-                          stream: asyncio.StreamReader):
+    async def read_stream(self, stream_name: str, stream: asyncio.StreamReader):
         """ log lines read in from this stream. 
 
         Args:
@@ -65,19 +65,25 @@ class Output:
 async def main(args=sys.argv[1:]):
     # first start an strace
     # persistent directory to store logs per output, for diagnostics later
-    output = Output(tempfile.mkdtemp())
+    output = Output(tempfile.mkdtemp(prefix="/tmp/"))
     main_process = await asyncio.create_subprocess_exec(
-        "strace",
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE)
+        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
     running_tasks = []
     running_tasks.append(
-        asyncio.create_task(
-            start_periodic_teed_process("iostat", output=output)))
+        asyncio.create_task(start_periodic_teed_process("iostat", output=output))
+    )
+    # running_tasks.append(
+    #   asyncio.create_task(start_periodic_teed_process("free", "-m", output=output))
+    # )
+    running_tasks.append(
+        asyncio.create_task(start_periodic_teed_process("vm_stat", output=output))
+    )
     running_tasks.append(
         asyncio.create_task(
-            start_periodic_teed_process("free", "-m", output=output)))
+            start_teed_process("sudo", "dtrace", "-p", main_process.pid, output=output)
+        )
+    )
     await asyncio.gather(
         output.read_stream("main", main_process.stdout),
         output.read_stream("main", main_process.stderr),
@@ -87,16 +93,19 @@ async def main(args=sys.argv[1:]):
     print(f"output written to {output.output_dir}")
 
 
-async def start_teed_process(*args: List[str]):
+async def start_teed_process(*args: List[str], output: Output = None):
     """
     start a teed proceses, print the results to stdout.
     """
+    print(args)
     command = args[0]
-    proc = await asyncio.create_subprocess_exec(*args,
-                                                stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.PIPE)
-    await asyncio.gather(read_to_logger(command, proc.stdout),
-                         read_to_logger(command, proc.stderr))
+    proc = await asyncio.create_subprocess_shell(
+        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    await asyncio.gather(
+        output.read_stream(command, proc.stdout),
+        output.read_stream(command, proc.stderr),
+    )
 
 
 async def read_to_logger(command_name: str, stream: asyncio.StreamReader):
@@ -115,9 +124,9 @@ async def read_to_logger(command_name: str, stream: asyncio.StreamReader):
         contents = await (stream.readline())
 
 
-async def start_periodic_teed_process(*args: List[str],
-                                      period_seconds: int = 2,
-                                      output: Output = None):
+async def start_periodic_teed_process(
+    *args: List[str], period_seconds: int = 2, output: Output = None
+):
     """ start a periodic teed process.
 
     In contrast to start_teed_process, a periodic teed process will re-execute periodically. 
@@ -125,7 +134,8 @@ async def start_periodic_teed_process(*args: List[str],
     stream_name = args[0]
     while True:
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE)
+            *args, stdout=asyncio.subprocess.PIPE
+        )
         out, _err = await proc.communicate()
         output.write(stream_name, out.decode())
         await asyncio.sleep(period_seconds)
