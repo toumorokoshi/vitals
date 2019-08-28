@@ -6,6 +6,12 @@ process that freezes the UI. It accomplishes this by:
 2. concurrently starting multiple other processes to observe things like
    IO, CPU, memory.
 3. printing these results to stdout and to files, so they can be looked at later.
+
+NOTES:
+
+after execution for osx, use dtruss as sudo, in a separate terminal:
+
+sudo dtruss -p 13084 2>&1 | tee /tmp/foo
 """
 import asyncio
 import datetime
